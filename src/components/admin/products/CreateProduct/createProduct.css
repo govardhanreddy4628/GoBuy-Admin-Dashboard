@@ -1,0 +1,9 @@
+/* Fix Quill inside Tailwind */
+.quill-custom .ql-toolbar {
+  border: none;
+}
+
+.quill-custom .ql-container {
+  border: none;
+  min-height: 150px;
+}
