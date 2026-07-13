@@ -8,7 +8,8 @@ import { Copy } from "lucide-react";
 import { Switch } from "../../../ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../../ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../../ui/dialog";
-import { useAuth } from "../../../context/AuthContext";
+import { useAuth } from "../../../context/authContext";
+
 
 const AdminSettings = () => {
   const API_BASE = import.meta.env.VITE_BACKEND_URL_LOCAL || "http://localhost:8080";
@@ -23,8 +24,7 @@ const AdminSettings = () => {
   const [verificationCode, setVerificationCode] = useState("");
   const [isVerifying, setIsVerifying] = useState(false);
 
-
-  // --- ENABLE MFA FLOW ---
+  // ENABLE MFA FLOW 
   const handleEnableMFA = async () => {
     try {
       const res = await fetch(`${API_BASE}/api/v1/user/mfa/generate`, {

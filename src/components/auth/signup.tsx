@@ -3,8 +3,7 @@ import { FaEye, FaEyeSlash, FaSpinner } from "react-icons/fa";
 import { FcGoogle } from "react-icons/fc";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "react-hot-toast";
-import { Formik, Form, Field } from "formik";
-import * as Yup from "yup";
+import { z } from "zod";
 import signinGif from "../../assets/signin.gif";
 
 interface SignupResponse {
@@ -14,35 +13,72 @@ interface SignupResponse {
   intentToken?: string;
 }
 
-const SignupSchema = Yup.object().shape({
-  name: Yup.string()
-    .min(3, "Name must be at least 3 characters")
-    .max(15, "Name must be less than 15 characters")
-    .required("Name is required"),
-  email: Yup.string().email("Invalid email").required("Email is required"),
-  password: Yup.string().min(6, "Must be 6+ chars").required("Required"),
-  confirmPassword: Yup.string()
-    .oneOf([Yup.ref("password")], "Passwords must match")
-    .required("Confirm password is required"),
-});
+// ✅ ZOD SCHEMA
+const SignupSchema = z
+  .object({
+    name: z
+      .string()
+      .min(3, "Name must be at least 3 characters")
+      .max(15, "Name must be less than 15 characters"),
+    email: z.string().email("Invalid email"),
+    password: z.string().min(6, "Must be 6+ chars"),
+    confirmPassword: z.string(),
+  })
+  .refine((data) => data.password === data.confirmPassword, {
+    message: "Passwords must match",
+    path: ["confirmPassword"],
+  });
 
 export default function SignUp() {
+  const [form, setForm] = useState({
+    name: "",
+    email: "",
+    password: "",
+    confirmPassword: "",
+  });
+
+  const [errors, setErrors] = useState<Record<string, string>>({});
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
+  // ✅ VALIDATION
+  const validate = () => {
+    const result = SignupSchema.safeParse(form);
+
+    if (result.success) {
+      setErrors({});
+      return true;
+    }
+
+    const formErrors: Record<string, string> = {};
+    result.error.errors.forEach((e) => {
+      const field = e.path[0];
+      if (field) formErrors[field as string] = e.message;
+    });
+
+    setErrors(formErrors);
+    return false;
+  };
+
+  // ✅ IMAGE UPLOAD
   const imageToBase64 = (file: File) => {
     return new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
       reader.readAsDataURL(file);
       reader.onload = () => resolve(reader.result as string);
-      reader.onerror = (error) => reject(error);
+      reader.onerror = reject;
     });
   };
 
-  const handleUploadPic = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleUploadPic = async (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
     const file = e.target.files?.[0];
     if (file) {
       const base64 = await imageToBase64(file);
@@ -51,22 +87,20 @@ export default function SignUp() {
     }
   };
 
-  const handleSubmit = async (
-    values: {
-      name: string;
-      email: string;
-      password: string;
-      confirmPassword: string;
-    },
-    { setSubmitting }: { setSubmitting: (isSubmitting: boolean) => void }
-  ) => {
-    try {
-      const formData = new FormData();
-      formData.append("fullName", values.name);
-      formData.append("email", values.email);
-      formData.append("password", values.password);
-      formData.append("confirmPassword", values.confirmPassword);
+  // ✅ SUBMIT
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
 
+    if (!validate()) return;
+
+    try {
+      setLoading(true);
+
+      const formData = new FormData();
+      formData.append("fullName", form.name);
+      formData.append("email", form.email);
+      formData.append("password", form.password);
+      formData.append("confirmPassword", form.confirmPassword);
 
       if (selectedFile) formData.append("image", selectedFile);
 
@@ -80,9 +114,8 @@ export default function SignUp() {
       );
 
       const result: SignupResponse = await response.json();
-      console.log(result)
 
-      if (!response.ok) throw new Error(result.message || "Signup failed");
+      if (!response.ok) throw new Error(result.message);
 
       localStorage.setItem("intentToken", result.intentToken || "");
       toast.success(result.message);
@@ -92,10 +125,11 @@ export default function SignUp() {
         error instanceof Error ? error.message : "Something went wrong"
       );
     } finally {
-      setSubmitting(false);
+      setLoading(false);
     }
   };
 
+  // ✅ GOOGLE
   const googleSignUp = () => {
     const API_BASE =
       import.meta.env.VITE_BACKEND_URL_LOCAL ||
@@ -109,176 +143,111 @@ export default function SignUp() {
     <section className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-950 px-4 py-10">
       <div className="bg-white dark:bg-gray-800 shadow-xl rounded-2xl p-8 w-full max-w-md border border-gray-200 dark:border-gray-700">
 
-        {/* Avatar Upload */}
+        {/* Avatar */}
         <div className="flex flex-col items-center mb-6">
           <div className="relative group">
             <img
               src={imagePreview || signinGif}
-              alt="avatar"
-              className="w-14 h-14 rounded-full object-cover border-4 border-gray-200 dark:border-gray-600 shadow-sm"
+              className="w-14 h-14 rounded-full object-cover border-4"
             />
-            <label className="absolute bottom-0 left-0 w-full text-center bg-black/60 text-white text-xs py-2 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer rounded-b-full">
+            <label className="absolute bottom-0 left-0 w-full text-center bg-black/60 text-white text-xs py-2 opacity-0 group-hover:opacity-100 cursor-pointer rounded-b-full">
               Upload Photo
               <input type="file" className="hidden" onChange={handleUploadPic} />
             </label>
           </div>
         </div>
 
-        <h2 className="text-2xl font-bold text-center mb-4 text-gray-900 dark:text-gray-100">
+        <h2 className="text-2xl font-bold text-center mb-4">
           Create Account
         </h2>
 
-        <Formik
-          initialValues={{
-            role: "user",
-            name: "",
-            email: "",
-            password: "",
-            confirmPassword: "",
-          }}
-          validationSchema={SignupSchema}
-          onSubmit={handleSubmit}
-        >
-          {({ isSubmitting, errors, touched }) => (
-            <Form className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4">
 
-              {/* Name */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Full Name
-                </label>
-                <Field
-                  name="name"
-                  type="text"
-                  placeholder="Enter your name"
-                  className="w-full border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 p-2 rounded-md focus:ring-2 focus:ring-red-500 focus:outline-none"
-                />
-                {touched.name && errors.name && (
-                  <div className="text-sm text-red-500 mt-1">{errors.name}</div>
-                )}
-              </div>
+          {/* NAME */}
+          <input
+            type="text"
+            placeholder="Full Name"
+            value={form.name}
+            onChange={(e) =>
+              setForm({ ...form, name: e.target.value })
+            }
+            className="w-full border p-2 rounded"
+          />
+          {errors.name && <p className="text-red-500 text-sm">{errors.name}</p>}
 
-              {/* Email */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Email
-                </label>
-                <Field
-                  name="email"
-                  type="email"
-                  placeholder="Enter your email"
-                  className="w-full border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 p-2 rounded-md focus:ring-2 focus:ring-red-500 focus:outline-none"
-                />
-                {touched.email && errors.email && (
-                  <div className="text-sm text-red-500 mt-1">{errors.email}</div>
-                )}
-              </div>
+          {/* EMAIL */}
+          <input
+            type="email"
+            placeholder="Email"
+            value={form.email}
+            onChange={(e) =>
+              setForm({ ...form, email: e.target.value })
+            }
+            className="w-full border p-2 rounded"
+          />
+          {errors.email && <p className="text-red-500 text-sm">{errors.email}</p>}
 
-              {/* Password */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Password
-                </label>
-                <div className="flex items-center border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 p-2 rounded-md">
-                  <Field
-                    name="password"
-                    type={showPassword ? "text" : "password"}
-                    placeholder="Enter password"
-                    className="flex-grow bg-transparent text-gray-900 dark:text-gray-100 focus:outline-none"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="text-gray-600 dark:text-gray-300 hover:text-black dark:hover:text-white"
-                  >
-                    {showPassword ? <FaEyeSlash /> : <FaEye />}
-                  </button>
-                </div>
-                {touched.password && errors.password && (
-                  <div className="text-sm text-red-500 mt-1">
-                    {errors.password}
-                  </div>
-                )}
-              </div>
+          {/* PASSWORD */}
+          <div className="flex border p-2 rounded">
+            <input
+              type={showPassword ? "text" : "password"}
+              placeholder="Password"
+              value={form.password}
+              onChange={(e) =>
+                setForm({ ...form, password: e.target.value })
+              }
+              className="flex-grow outline-none"
+            />
+            <button type="button" onClick={() => setShowPassword(!showPassword)}>
+              {showPassword ? <FaEyeSlash /> : <FaEye />}
+            </button>
+          </div>
+          {errors.password && <p className="text-red-500 text-sm">{errors.password}</p>}
 
-              {/* Confirm Password */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Confirm Password
-                </label>
-                <div className="flex items-center border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 p-2 rounded-md">
-                  <Field
-                    name="confirmPassword"
-                    type={showConfirmPassword ? "text" : "password"}
-                    placeholder="Confirm password"
-                    className="flex-grow bg-transparent text-gray-900 dark:text-gray-100 focus:outline-none"
-                  />
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setShowConfirmPassword(!showConfirmPassword)
-                    }
-                    className="text-gray-600 dark:text-gray-300 hover:text-black dark:hover:text-white"
-                  >
-                    {showConfirmPassword ? <FaEyeSlash /> : <FaEye />}
-                  </button>
-                </div>
-                {touched.confirmPassword && errors.confirmPassword && (
-                  <div className="text-sm text-red-500 mt-1">
-                    {errors.confirmPassword}
-                  </div>
-                )}
-              </div>
-
-              {/* Submit */}
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                className={`w-full py-2 rounded-md flex items-center justify-center gap-2 transition-all ${isSubmitting
-                    ? "bg-black text-white cursor-wait"
-                    : "bg-red-600 hover:bg-red-700 text-white"
-                  }`}
-              >
-                {isSubmitting ? (
-                  <>
-                    <FaSpinner className="animate-spin" />
-                    Submitting...
-                  </>
-                ) : (
-                  "Sign Up"
-                )}
-              </button>
-
-              {/* Divider */}
-              <div className="flex items-center gap-2 my-4">
-                <hr className="flex-grow border-gray-300 dark:border-gray-600" />
-                <span className="text-gray-500 dark:text-gray-400 text-sm">OR</span>
-                <hr className="flex-grow border-gray-300 dark:border-gray-600" />
-              </div>
-
-              {/* Google */}
-              <button
-                type="button"
-                className="flex items-center justify-center gap-3 w-full border border-gray-300 dark:border-gray-600 rounded-md py-2 hover:bg-gray-50 dark:hover:bg-gray-700 transition text-gray-800 dark:text-gray-100"
-                onClick={googleSignUp}
-              >
-                <FcGoogle size={22} />
-                <span>Sign up with Google</span>
-              </button>
-
-              <p className="text-center text-sm text-gray-600 dark:text-gray-400 mt-4">
-                Already have an account?{" "}
-                <Link
-                  to="/login"
-                  className="text-red-600 font-medium hover:underline"
-                >
-                  Login
-                </Link>
-              </p>
-
-            </Form>
+          {/* CONFIRM */}
+          <div className="flex border p-2 rounded">
+            <input
+              type={showConfirmPassword ? "text" : "password"}
+              placeholder="Confirm Password"
+              value={form.confirmPassword}
+              onChange={(e) =>
+                setForm({ ...form, confirmPassword: e.target.value })
+              }
+              className="flex-grow outline-none"
+            />
+            <button type="button" onClick={() => setShowConfirmPassword(!showConfirmPassword)}>
+              {showConfirmPassword ? <FaEyeSlash /> : <FaEye />}
+            </button>
+          </div>
+          {errors.confirmPassword && (
+            <p className="text-red-500 text-sm">{errors.confirmPassword}</p>
           )}
-        </Formik>
+
+          {/* SUBMIT */}
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full py-2 bg-red-600 text-white rounded"
+          >
+            {loading ? <FaSpinner className="animate-spin" /> : "Sign Up"}
+          </button>
+
+          {/* GOOGLE */}
+          <button
+            type="button"
+            onClick={googleSignUp}
+            className="w-full border py-2 flex justify-center gap-2"
+          >
+            <FcGoogle /> Sign up with Google
+          </button>
+
+          <p className="text-center text-sm mt-4">
+            Already have an account?{" "}
+            <Link to="/login" className="text-red-600">
+              Login
+            </Link>
+          </p>
+        </form>
       </div>
     </section>
   );

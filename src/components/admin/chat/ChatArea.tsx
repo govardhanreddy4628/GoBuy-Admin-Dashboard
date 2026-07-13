@@ -2,36 +2,57 @@ import { ChatHeader } from "./ChatHeader";
 import { MessagesList } from "./MessagesList";
 import { ChatInput } from "./ChatInput";
 import { RiChatNewLine } from "react-icons/ri";
-import { Socket } from "socket.io-client";
-import { Chat } from "./chat";
+import type { Member } from "./GroupSettings";
 
 interface Message {
   id: string;
-  content: string;
-  timestamp: Date;
+  text?: string;
+  media?: any[];
+  type?: string;
+  createdAt: Date;
   isOwn: boolean;
   senderName?: string;
   senderAvatar?: string;
   isRead?: boolean;
-  status?: "sending" | "sent" | "failed";
+  status?: "sent" | "delivered" | "read" | "failed";
 }
 
+interface Chat {
+  id: string;
+  chatName: string;
+  isOnline: boolean;
+  isGroup: boolean;
+  memberCount?: number;
+  chatAvatar?: string;
+  members?: Member[];
+}
 interface ChatAreaProps {
   selectedChat: Chat | null;
   messages: Message[];
-  onSendMessage: (data: { text?: string; file?: File | null }) => void;
-  socketRef: React.MutableRefObject<Socket | null>;
+  handleSendMessage: (data: { text?: string; files?: File[] }) => void;
   selectedChatId?: string;
   handleNewChat: () => void;
+  onAddMembers?: (chatId: string, members: Member[]) => void;
+  onRemoveMember?: (chatId: string, memberId: string) => void;
+  onLeaveGroup?: (chatId: string) => void;
+  onRenameGroup?: (chatId: string, name: string) => void;
+  onToggleAdmin?: (chatId: string, memberId: string) => void;
+  currentUserId?: string;
+  onlineUserIds?: string[];
+  handleUpdateGroupIcon: () => void;
+  handleRemoveGroupIcon: () => void;
 }
 
 export function ChatArea({
   selectedChat,
   messages,
-  onSendMessage,
+  handleSendMessage,
   handleNewChat,
-  socketRef,
   selectedChatId,
+  onAddMembers, onRemoveMember, onLeaveGroup, onRenameGroup, onToggleAdmin,
+  currentUserId, onlineUserIds = [],
+  handleUpdateGroupIcon,
+  handleRemoveGroupIcon
 }: ChatAreaProps) {
 
   if (!selectedChat) {
@@ -53,22 +74,38 @@ export function ChatArea({
     );
   }
 
+  const isDirectPartnerOnline =
+    !selectedChat.isGroup && selectedChat.members?.some(
+      (m) => m._id !== currentUserId && onlineUserIds.includes(m._id)
+    );
+
   return (
     <div className="flex-1 flex flex-col bg-background">
       <ChatHeader
+        chatId={selectedChat.id}
         chatName={selectedChat.chatName}
-        //isOnline={selectedChat.isOnline}
+        isOnline={isDirectPartnerOnline}
         isGroup={selectedChat.isGroup}
         memberCount={selectedChat.memberCount}
         chatAvatar={selectedChat.chatAvatar}
+        members={selectedChat.members}
+        onAddMembers={(m) => onAddMembers?.(selectedChat.id, m)}
+        onRemoveMember={(id) => onRemoveMember?.(selectedChat.id, id)}
+        onLeaveGroup={() => onLeaveGroup?.(selectedChat.id)}
+        onRenameGroup={(n) => onRenameGroup?.(selectedChat.id, n)}
+        onToggleAdmin={(id) => onToggleAdmin?.(selectedChat.id, id)}
+        currentUserId={currentUserId}
+        onlineUserIds={onlineUserIds}
+        handleUpdateGroupIcon={handleUpdateGroupIcon}
+        handleRemoveGroupIcon={handleRemoveGroupIcon}
       />
 
       <MessagesList messages={messages} />
 
       <ChatInput
-        onSendMessage={onSendMessage}
-        socketRef={socketRef}
+        handleSendMessage={handleSendMessage}
         selectedChatId={selectedChatId}
+        chatMembers={selectedChat?.members?.map((m: Member) => m._id) ?? []}
       />
     </div>
   );

@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import io from 'socket.io-client';
 import { ChatSidebar } from './ChatSidebar';
 import { ChatArea } from './ChatArea';
 import { toast } from "../../../hooks/use-toast";
@@ -11,10 +10,11 @@ import { Input } from "../../../ui/input";
 import { ScrollArea } from "../../../ui/scroll-area";
 import { Avatar, AvatarFallback, AvatarImage } from "../../../ui/avatar";
 import { useAuth } from '../../../context/authContext';
-import { getAccessToken, POST } from '../../../api/api_utility';
+import { DELETE, GET, getAccessToken, POST, PUT } from '../../../api/api_utility';
 import { MessageFromApi } from '../types/chat/message.api';
 import { ChatFromApi } from '../types/chat/chat.api';
 import axios from "axios";
+import { socket, connectSocket } from "../../admin/socket";
 
 const EVENTS = {
   NEW_MESSAGE: "NEW_MESSAGE",
@@ -24,6 +24,7 @@ const EVENTS = {
   CHAT_JOINED: "CHAT_JOINED",
   CHAT_LEAVED: "CHAT_LEAVED",
   ONLINE_USERS: "ONLINE_USERS",
+  MESSAGE_MEDIA_UPLOADED: "MESSAGE_MEDIA_UPLOADED"
 };
 interface Message {
   id: string;
@@ -50,7 +51,7 @@ export interface Chat {
   isOnline: boolean;
   chatAvatar?: string;
   isGroup: boolean;
-  members?: string[];
+  members?: Member[];
   createdAt?: string;
   updatedAt?: string;
 }
@@ -62,10 +63,15 @@ interface User {
   isOnline?: boolean;
 }
 
-const Chat = () => {
-  // ✅ Infer the correct type from the io() return
-  const socketRef = useRef<ReturnType<typeof io> | null>(null);
+export interface Member {
+  _id: string;
+  fullName: string;
+  email?: string;
+  avatar?: string;
+  isAdmin?: boolean;
+}
 
+const Chat = () => {
   const [selectedChatId, setSelectedChatId] = useState<string>();
   const [chats, setChats] = useState<Chat[]>([]);
   const [messages, setMessages] = useState<Record<string, Message[]>>({});
@@ -97,7 +103,7 @@ const Chat = () => {
         unreadCount: 0,
         isOnline: false,
         isGroup: pendingChat.members.length > 2,
-        members: pendingChat.members,
+        members: pendingChat.members.map((id) => ({ _id: id, fullName: "" })),
         createdAt: new Date().toISOString(),
       } as Chat;
     }
@@ -115,7 +121,7 @@ const Chat = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [creatingChat, setCreatingChat] = useState(false);
 
-  console.log(isConnected)
+  const getMemberId = (m: any): string => (typeof m === "string" ? m : m?._id);
 
   function getLastMessagePreview(message: Message): string {
     if (!message) return "";
@@ -178,9 +184,8 @@ const Chat = () => {
             const otherUser = chat.members?.find(
               (m: any) => m._id !== currentUserId
             );
-
             chatName = otherUser?.fullName || "Unknown";
-            chatAvatar = otherUser?.avatar;
+            chatAvatar = otherUser?.avatar || "";
           }
           return {
             id: chat.id,
@@ -198,13 +203,11 @@ const Chat = () => {
             isOnline: false
           };
         });
-
         setChats(formatted);
       } catch (err) {
         console.error("fetchChats error:", err);
       }
     };
-
     fetchChats();
   }, [currentUserId, token]);
 
@@ -219,9 +222,7 @@ const Chat = () => {
           { credentials: "include", headers: { Authorization: `Bearer ${token}` } }
         );
         const data = await res.json();
-
         const formatMessage: Message[] = data.map((msg: MessageFromApi) => ({
-
           id: msg._id,
           chatID: msg.chatId,
           text: msg.text,
@@ -235,24 +236,20 @@ const Chat = () => {
           isRead: msg.readBy?.some(
             (r) => (typeof r.user === "string" ? r.user : r.user._id) === currentUserId
           ),
-
           status: msg.status,
           createdAt: new Date(msg.createdAt),
         }));
-
         setMessages(prev => ({ ...prev, [selectedChatId]: formatMessage }));
       } catch (err) {
         console.error("fetchMessages error:", err);
       }
     };
-
     fetchMessages();
   }, [selectedChatId, currentUserId, token]);
 
   useEffect(() => {
-    if (!selectedChatId || !socketRef.current) return;
-
-    socketRef.current.emit("MARK_SEEN", {
+    if (!selectedChatId || !socket) return;
+    socket.emit("MARK_SEEN", {
       chatId: selectedChatId,
       userId: currentUserId,
     });
@@ -260,12 +257,7 @@ const Chat = () => {
 
   // ✅ SOCKET CONNECTION
   useEffect(() => {
-    const backendUrl = import.meta.env.VITE_BACKEND_URL_LOCAL as string;
 
-    if (!backendUrl) {
-      console.error('Backend URL is not defined.');
-      return;
-    }
     // if (!currentUserId) {
     //   console.error('User ID is not available.');
     //   return;
@@ -273,38 +265,21 @@ const Chat = () => {
 
     if (!currentUserId) return; // silently wait
 
-    socketRef.current = io(backendUrl + "/admin", {
-      auth: {
-        token,
-      },
-      withCredentials: true, // Add this at the top level
-      transports: ["websocket", "polling"], // Add polling as fallback
-      transportOptions: {
-        websocket: {
-          withCredentials: true,
-        },
-      },
-      reconnectionAttempts: 5,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
-    });
+    // ✅ CONNECT SOCKET WITH TOKEN
+    connectSocket();
 
-
-    const sock = socketRef.current;
-
-    sock.on("connect", () => {
-      console.log("🟢 Connected to socket", sock.id);
+    socket.on("connect", () => {
+      console.log("🟢 Connected to socket", socket.id);
       setIsConnected(true);
     });
-    sock.on("disconnect", () => {
+    socket.on("disconnect", () => {
       console.log("🔴 Disconnected from socket");
       setIsConnected(false);
     });
 
     // Listen for icoming messages or Receive message
-    sock.on(EVENTS.NEW_MESSAGE, ({ chatId, message, chat: incomingChat }) => {
+    socket.on(EVENTS.NEW_MESSAGE, ({ chatId, message, chat: incomingChat }) => {
       const realChatId = chatId.toString();
-
       const formatted: Message = {
         id: message._id,
         text: message.text,
@@ -322,9 +297,7 @@ const Chat = () => {
       // Update messages — migrate any pending temp entry to real chatId
       setMessages((prev) => {
         const next: Record<string, Message[]> = { ...prev };
-
         const existing = next[realChatId] ?? [];
-
         let updated = [...existing];
 
         // ✅ STEP 1: FIND MATCHING OPTIMISTIC MESSAGE
@@ -346,12 +319,8 @@ const Chat = () => {
         } else {
           // ✅ NORMAL MESSAGE (OTHER USER)
           const alreadyExists = updated.some((m) => m.id === message._id);
-
-          if (!alreadyExists) {
-            updated.push(formatted);
-          }
+          if (!alreadyExists) { updated.push(formatted); }
         }
-
         next[realChatId] = updated;
         return next;
       });
@@ -363,7 +332,7 @@ const Chat = () => {
       });
 
       // Clear pendingChat once we have a real id
-      setPendingChat(null);
+      setPendingChat((prev) => (prev && selectedChatId === prev.id ? null : prev));
 
       // Update chats sidebar
       // 🔥 FIXED CHAT SIDEBAR LOGIC
@@ -380,7 +349,6 @@ const Chat = () => {
             const otherUser = incomingChat?.members?.find(
               (m: any) => (m._id ?? m) !== currentUserId
             );
-
             chatName = otherUser?.fullName || chatName;
             chatAvatar = otherUser?.avatar || chatAvatar;
           }
@@ -392,7 +360,7 @@ const Chat = () => {
                 id: realChatId,
                 chatName,
                 chatAvatar,
-                lastMessage: message.text || "New message",
+                lastMessage: getLastMessagePreview(formatted),
                 updatedAt: message.createdAt,
               }
               : c
@@ -405,6 +373,7 @@ const Chat = () => {
         if (!exists) {
           let chatName = "Unknown";
           let chatAvatar = "";
+          console.log(chatName)
 
           if (incomingChat?.isGroup) {
             chatName = incomingChat.chatName || "Group";
@@ -426,10 +395,13 @@ const Chat = () => {
             unreadCount: 1,
             isOnline: false,
             isGroup: incomingChat?.isGroup ?? false,
-            members: incomingChat?.members?.map((m: any) => m._id ?? m),
+            members: incomingChat?.members?.map((m: any) => ({
+              _id: m._id ?? m,
+              fullName: m.fullName ?? "",
+              avatar: m.avatar,
+            })),
             createdAt: incomingChat?.createdAt,
           };
-
           return [newChat, ...prev];
         }
         // ✅ CASE 3: normal update
@@ -450,7 +422,7 @@ const Chat = () => {
 
     // ✅ ALERT (unread count)
     // Only increment unread for chats that are NOT currently selected
-    sock.on(EVENTS.NEW_MESSAGE_ALERT, ({ chatId }) => {
+    socket.on(EVENTS.NEW_MESSAGE_ALERT, ({ chatId }) => {
       setSelectedChatId((activeChatId) => {
         if (activeChatId !== chatId.toString()) {
           setChats((prev) =>
@@ -466,14 +438,14 @@ const Chat = () => {
     });
 
     // ── Online users ──────────────────
-    sock.on(EVENTS.ONLINE_USERS, (users: string[]) => {
+    socket.on(EVENTS.ONLINE_USERS, (users: string[]) => {
       setOnlineUsers(users);
       setChats((prev) =>
         prev.map((c) => ({
           ...c,
           isOnline: !c.isGroup && c.members
             ? c.members.some(
-              (id) => id !== currentUserId && users.includes(id)
+              (m) => getMemberId(m) !== currentUserId && users.includes(getMemberId(m))
             )
             : false,
         }))
@@ -481,18 +453,18 @@ const Chat = () => {
     });
 
     // ✅ ERROR HANDLING
-    sock.on("error", (err: { message: string }) => {
+    socket.on("error", (err: { message: string }) => {
       toast({ title: "Error", description: err.message, variant: "destructive" });
     });
 
     return () => {
-      sock.off("connect");
-      sock.off("disconnect");
-      sock.off(EVENTS.NEW_MESSAGE);
-      sock.off(EVENTS.NEW_MESSAGE_ALERT);
-      sock.off(EVENTS.ONLINE_USERS);
-      sock.off("error");
-      sock.disconnect();
+      socket.off("connect");
+      socket.off("disconnect");
+      socket.off(EVENTS.NEW_MESSAGE);
+      socket.off(EVENTS.NEW_MESSAGE_ALERT);
+      socket.off(EVENTS.ONLINE_USERS);
+      socket.off("error");
+      socket.disconnect();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUserId]); // only re-run if user changes
@@ -500,54 +472,69 @@ const Chat = () => {
 
   // ─── Emit CHAT_JOINED / CHAT_LEAVED on chat switch ────────────────────────
   const prevChatRef = useRef<string | undefined>();
+
   useEffect(() => {
-    if (!socketRef.current) return;
+    if (!socket) return;
 
     const prevId = prevChatRef.current;
-    const prevChat = chats.find((c) => c.id === prevId);
-
-    // Leave previous chat
-    if (prevId && prevChat) {
-      socketRef.current.emit(EVENTS.CHAT_LEAVED, {
-        userId: currentUserId,
-        members: prevChat.members ?? [],
-      });
+    if (prevId) {
+      socket.emit(EVENTS.CHAT_LEAVED, { chatId: prevId });
     }
 
-    // Join new chat
-    if (selectedChatId && selectedChat) {
-      socketRef.current.emit(EVENTS.CHAT_JOINED, {
-        userId: currentUserId,
-        members: selectedChat.members ?? [],
-        chatId: selectedChatId,
-      });
+    if (selectedChatId) {
+      socket.emit(EVENTS.CHAT_JOINED, { chatId: selectedChatId });
 
-      // Clear unread for this chat
       setChats((prev) =>
-        prev.map((c) =>
-          c.id === selectedChatId ? { ...c, unreadCount: 0 } : c
-        )
+        prev.map((c) => (c.id === selectedChatId ? { ...c, unreadCount: 0 } : c))
       );
     }
 
     prevChatRef.current = selectedChatId;
-  }, [selectedChatId]); // eslint-disable-line react-hooks/exhaustive-deps  
+  }, [selectedChatId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // useEffect(() => {
+  //   if (!socket) return;
+
+  //   const prevId = prevChatRef.current;
+  //   const prevChat = chats.find((c) => c.id === prevId);
+
+  //   // Leave previous chat
+  //   if (prevId && prevChat) {
+  //     socket.emit(EVENTS.CHAT_LEAVED, {
+  //       userId: currentUserId,
+  //       members: prevChat.members ?? [],
+  //     });
+  //   }
+
+  //   // Join new chat
+  //   if (selectedChatId && selectedChat) {
+  //     socket.emit(EVENTS.CHAT_JOINED, {
+  //       userId: currentUserId,
+  //       members: (selectedChat.members ?? []).map(getMemberId),
+  //       chatId: selectedChatId,
+  //     });
+
+  //     // Clear unread for this chat
+  //     setChats((prev) =>
+  //       prev.map((c) =>
+  //         c.id === selectedChatId ? { ...c, unreadCount: 0 } : c
+  //       )
+  //     );
+  //   }
+
+  //   prevChatRef.current = selectedChatId;
+  // }, [selectedChatId]); 
 
   // fetch users
   useEffect(() => {
     const fetchUsers = async () => {
       setLoadingUsers(true);
       try {
-        const res = await fetch("http://localhost:8080/api/v1/chat/users", { credentials: "include" });
+        const res = await GET("/api/v1/chat/users");
+        //if (!res.data.ok) { throw new Error("Failed to fetch users"); }
+        console.log("users list:" + res.data)
 
-        if (!res.ok) {
-          throw new Error("Failed to fetch users");
-        }
-
-        const data = await res.json();
-        console.log(data)
-
-        setAllUsers(data.users); // make sure backend returns array
+        setAllUsers(res.data?.users || []); // make sure backend returns array
       } catch (error) {
         console.error("Error fetching users:", error);
         toast({ title: "Error", description: "Failed to load users" });
@@ -642,7 +629,7 @@ const Chat = () => {
           (c) =>
             !c.isGroup &&
             c.members?.length === 2 &&
-            c.members.includes(targetUserId)
+            c.members.some((m) => getMemberId(m) === targetUserId)
         );
 
         if (existing) {
@@ -673,15 +660,19 @@ const Chat = () => {
         }
 
         if (memberIds.length < 2) {
-          throw new Error("Select at least 2 users");
+          toast({ title: "Select at least 2 users", variant: "destructive" });
+          setCreatingChat(false);
+          return;
         }
+        console.log("this is group chat")
 
         // 🔥 API call using axios utility
-        const { data } = await POST<{ success: boolean; data: any; message: string; }>("/api/v1/chat/newgroup", {
+        const { data } = await POST("/api/v1/chat/newgroup", {
           members: memberIds, name: trimmedName,
         });
 
         const chat = data.data;
+        console.log("chat:" + chat)
 
         if (!chat?._id) {
           throw new Error("Invalid server response");
@@ -695,7 +686,11 @@ const Chat = () => {
           isOnline: false,
           isGroup: true,
           chatAvatar: chat.groupIcon?.url || "",
-          members: chat.members.map((m: any) => m._id),
+          members: chat.members.map((m: any) => ({
+            _id: m._id,
+            fullName: m.fullName,
+            avatar: m.avatar,
+          })),
           createdAt: chat.createdAt,
           updatedAt: chat.updatedAt,
         };
@@ -705,6 +700,9 @@ const Chat = () => {
         setSelectedChatId(formatted.id);
 
         toast({ title: "Group Created", description: `Group ${trimmedName} created with ${contacts.length} members` });
+        setShowUsersModal(false);
+        setGroupName("");
+        setSelectedUsers([]);
       }
     } catch (error: any) {
       // 🔥 Axios-aware error handling
@@ -721,7 +719,6 @@ const Chat = () => {
       toast({ title: "Error", description: "Failed to create group", variant: "destructive" });
     } finally {
       setCreatingChat(false);
-      setShowUsersModal(false);
       setGroupName("");
       setSelectedUsers([]);
     }
@@ -733,105 +730,6 @@ const Chat = () => {
   // };
 
 
-  // ✅ SEND MESSAGE (SOCKET ONLY)
-  const handleSendMessage = useCallback(
-   async (payload: { text?: string; files?: File[] }) => {
-      if (!selectedChatId || !socketRef.current) return;
-
-      const text = payload.text?.trim();
-      const files = payload.files;
-
-      // ❌ CASE: nothing
-      if (!text && (!files || files.length === 0)) return;
-
-      // Get members from selected chat or pending chat
-      let members: string[] = [];
-
-      if (selectedChat?.members) {
-        members = selectedChat.members;
-      } else if (pendingChat?.members) {
-        members = pendingChat.members;
-      }
-
-      // Ensure we have the other member(s) to send to
-      const otherMembers = members.filter((id: string) => id !== currentUserId);
-
-      if (otherMembers.length === 0) {
-        console.error("No recipients for message");
-        return;
-      }
-
-      // Optimistic message
-      const tempMsgId = `temp-msg-${Date.now()}`;
-      const clientId = `client-${Date.now()}`;
-
-      let uploadedMedia: any[] = [];
-
-      // ✅ UPLOAD FIRST (IMPORTANT)
-      if (files && files.length > 0) {
-        const formData = new FormData();
-
-        files.forEach((file) => {
-          formData.append("files", file);
-        });
-
-        const res = await fetch("/api/v1/upload/chat-media", {
-          method: "POST",
-          body: formData,
-        });
-
-        uploadedMedia = await res.json();
-      }
-
-      // ✅ DETECT TYPE
-      let type = "text";
-      let isMixedMedia = false;
-
-      if (uploadedMedia.length > 0) {
-        const types = uploadedMedia.map((m: any) => m.type);
-        const allSame = types.every((t) => t === types[0]);
-
-        type = types[0];
-        if (!allSame) isMixedMedia = true;
-      }
-
-      const messagePayload = {
-        text: text || "",
-        media: uploadedMedia,
-        type, 
-        isMixedMedia,
-        clientId,
-      };
-
-      const optimistic: Message = {
-        id: tempMsgId,
-        text,
-        media: uploadedMedia,
-        type: messagePayload.type,
-        createdAt: new Date(),
-        isOwn: true,
-        senderName: user?.fullName ?? "You",
-        status: "sent",
-        clientId,
-      };
-
-      setMessages((prev) => ({
-        ...prev,
-        [selectedChatId]: [...(prev[selectedChatId] ?? []), optimistic],
-      }));
-
-      // Emit to server - send only OTHER members
-      socketRef.current.emit(EVENTS.NEW_MESSAGE, {
-        chatId: selectedChatId.startsWith("temp") ? null : selectedChatId,
-        members: otherMembers,
-        message: messagePayload,
-        groupName: selectedChat?.isGroup ? selectedChat.chatName : undefined,
-      });
-    },
-    [selectedChatId, selectedChat, pendingChat, currentUserId, user]
-  );
-
-
   // ─── Current messages for selected chat ──────────────────────────────────
   const currentMessages = useMemo(
     () => (selectedChatId ? (messages[selectedChatId] ?? []) : []),
@@ -839,6 +737,434 @@ const Chat = () => {
   );
 
   console.log(chats.map(c => c.id));
+
+  const handleAddMembers = async (chatId: string, newMembers: Member[]) => {
+    try {
+      const { data } = await POST(`/api/v1/chat/add-members/${chatId}`, {
+        members: newMembers.map((m) => m._id),
+      });
+      const updatedMembers: Member[] = data.data.members;
+      setChats((prev) =>
+        prev.map((c) => (c.id === chatId ? { ...c, members: updatedMembers } : c))
+      );
+      toast({ title: "Members added" });
+    } catch (err) {
+      console.error(err);
+      toast({ title: "Error", description: "Failed to add members", variant: "destructive" });
+    }
+  };
+
+  const handleRemoveMember = async (chatId: string, memberId: string) => {
+    try {
+      await POST(`/api/v1/chat/remove-member/${chatId}`, { memberId });
+      setChats((prev) =>
+        prev.map((c) =>
+          c.id === chatId
+            ? { ...c, members: (c.members ?? []).filter((m) => m._id !== memberId) }
+            : c
+        )
+      );
+      toast({ title: "Member removed" });
+    } catch (err) {
+      console.error(err);
+      toast({ title: "Error", description: "Failed to remove member", variant: "destructive" });
+    }
+  };
+
+
+  const handleLeaveGroup = async (chatId: string) => {
+    try {
+      await DELETE(`/api/v1/chat/leave/${chatId}`);
+
+      // ✅ Remove chat from sidebar
+      setChats((prev) => prev.filter((c) => c.id !== chatId));
+
+      // ✅ Remove messages
+      setMessages((prev) => {
+        const updated = { ...prev };
+        delete updated[chatId];
+        return updated;
+      });
+
+      // ✅ Reset selected chat if needed
+      setSelectedChatId((prev) =>
+        prev === chatId ? undefined : prev
+      );
+
+      // ✅ Notify others (optional, backend already emits usually)
+      socket?.emit("REFETCH_CHATS");
+
+      toast({
+        title: "Left Group",
+        description: "You left the group successfully",
+      });
+
+    } catch (err) {
+      console.error("Leave group error:", err);
+      toast({
+        title: "Error",
+        description: "Failed to leave group",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleUpdateGroupIcon = async (chatId: string, file: File) => {
+    try {
+      const formData = new FormData();
+      formData.append("image", file); // ✅ must match multer.single("image")
+
+      const { data } = await POST(`/api/v1/chat/icon/${chatId}`, formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+
+      setChats((prev) =>
+        prev.map((c) =>
+          c.id === chatId ? { ...c, chatAvatar: data.data.groupIcon?.url } : c
+        )
+      );
+    } catch (err) {
+      console.error(err);
+      throw err;
+    }
+  };
+
+  const handleRemoveGroupIcon = async (chatId: string) => {
+    try {
+      await DELETE(`/api/v1/chat/icon/${chatId}`);
+      setChats((prev) =>
+        prev.map((c) => (c.id === chatId ? { ...c, chatAvatar: undefined } : c))
+      );
+    } catch (err) {
+      console.error(err);
+      throw err;
+    }
+  };
+
+  const handleRenameGroup = async (chatId: string, name: string) => {
+    if (!name.trim()) {
+      return toast({ title: "Invalid name", description: "Group name cannot be empty", variant: "destructive" });
+    }
+    try {
+      await PUT(`/api/v1/chat/rename/${chatId}`, { name });
+      setChats((prev) => prev.map((c) => (c.id === chatId ? { ...c, chatName: name } : c)));
+      toast({ title: "Success", description: "Group renamed successfully" });
+    } catch (err) {
+      console.error(err);
+      toast({ title: "Error", description: "Failed to rename group", variant: "destructive" });
+    }
+  };
+
+  const handleToggleAdmin = async (chatId: string, memberId: string) => {
+    try {
+      await POST(`/api/v1/chat/toggle-admin/${chatId}`, { memberId });
+      setChats((prev) =>
+        prev.map((c) =>
+          c.id === chatId
+            ? {
+              ...c,
+              members: (c.members ?? []).map((m) =>
+                m._id === memberId ? { ...m, isAdmin: !m.isAdmin } : m
+              ),
+            }
+            : c
+        )
+      );
+    } catch (err) {
+      console.error(err);
+      toast({ title: "Error", description: "Failed to update admin", variant: "destructive" });
+    }
+  };
+
+  // const promoteDraftIfNeeded = (content: string) => {
+  //   if (draftChat && draftChat.id === selectedChatId) {
+  //     const promoted: Chat = {
+  //       ...draftChat,
+  //       lastMessage: content,
+  //       timestamp: 'now',
+  //     } as Chat;
+  //     setExtraChats(prev => [promoted, ...prev]);
+  //     setDraftChat(null);
+  //   }
+  // };
+
+
+  const uploadChatMedia = async (files: File[]) => {
+    const formData = new FormData();
+
+    files.forEach((file) => {
+      formData.append("media", file);
+    });
+
+    const res = await POST("/api/v1/upload/chat-media", formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+
+    return res.data;
+  };
+
+  const handleSendMessage = useCallback(
+    async (payload: { text?: string; files?: File[] }) => {
+      if (!selectedChatId || !socket) return;
+
+      const text = payload.text?.trim() || "";
+      const files = payload.files || [];
+      if (!text && files.length === 0) return;
+
+      const rawMembers: any[] = selectedChat?.members ?? pendingChat?.members ?? [];
+      const otherMembers = rawMembers
+        .map((m) => getMemberId(m))
+        .filter((id: string) => id !== currentUserId);
+
+      if (otherMembers.length === 0) {
+        toast({ title: "Error", description: "No recipients for message", variant: "destructive" });
+        return;
+      }
+
+      const groupName = selectedChat?.isGroup ? selectedChat.chatName : undefined;
+      const chatIdForEmit = selectedChatId.startsWith("temp") ? null : selectedChatId;
+
+      // ── Case 1: text-only message — no upload dependency, send instantly ──
+      if (files.length === 0) {
+        const clientId = `client-${Date.now()}`;
+        const tempId = `temp-msg-${Date.now()}`;
+
+        setMessages((prev) => ({
+          ...prev,
+          [selectedChatId]: [
+            ...(prev[selectedChatId] ?? []),
+            {
+              id: tempId,
+              text,
+              type: "text",
+              createdAt: new Date(),
+              isOwn: true,
+              senderName: user?.fullName ?? "You",
+              status: "sent",
+              clientId,
+            },
+          ],
+        }));
+
+        socket.emit(EVENTS.NEW_MESSAGE, {
+          chatId: chatIdForEmit,
+          members: otherMembers,
+          message: { text, media: [], type: "text", isMixedMedia: false, clientId },
+          groupName,
+        });
+        return;
+      }
+
+      // ── Case 2: one or more files — each becomes its OWN message, ──
+      // ── uploaded and delivered independently, in parallel.        ──
+      files.forEach((file, index) => {
+        const clientId = `client-${Date.now()}-${index}`;
+        const tempId = `temp-msg-${Date.now()}-${index}`;
+        const localUrl = URL.createObjectURL(file);
+        const mediaType = file.type.startsWith("image") ? "image"
+          : file.type.startsWith("video") ? "video"
+            : file.type.startsWith("audio") ? "audio" : "document";
+
+        // caption only goes on the FIRST file, like WhatsApp
+        const messageText = index === 0 ? text : "";
+
+        // optimistic bubble, appears instantly with 0% progress
+        setMessages((prev) => ({
+          ...prev,
+          [selectedChatId]: [
+            ...(prev[selectedChatId] ?? []),
+            {
+              id: tempId,
+              text: messageText,
+              media: [{ localUrl, type: mediaType }],
+              type: mediaType,
+              createdAt: new Date(),
+              isOwn: true,
+              senderName: user?.fullName ?? "You",
+              status: "uploading" as any, // extend your Message["status"] union to include this
+              uploadProgress: 0,
+              clientId,
+            },
+          ],
+        }));
+
+        // fire-and-forget per file — doesn't block other files or other messages
+        (async () => {
+          try {
+            const uploadedMedia = await uploadSingleChatMedia(file, (pct) => {
+              setMessages((prev) => ({
+                ...prev,
+                [selectedChatId]: (prev[selectedChatId] || []).map((m) =>
+                  m.id === tempId ? { ...m, uploadProgress: pct } : m
+                ),
+              }));
+            });
+
+            socket.emit(EVENTS.NEW_MESSAGE, {
+              chatId: chatIdForEmit,
+              members: otherMembers,
+              message: {
+                text: messageText,
+                media: uploadedMedia,
+                type: mediaType,
+                isMixedMedia: false,
+                clientId,
+              },
+              groupName,
+            });
+
+            setMessages((prev) => ({
+              ...prev,
+              [selectedChatId]: (prev[selectedChatId] || []).map((m) =>
+                m.id === tempId ? { ...m, media: uploadedMedia, status: "sent" } : m
+              ),
+            }));
+          } catch (err) {
+            console.error(err);
+            setMessages((prev) => ({
+              ...prev,
+              [selectedChatId]: (prev[selectedChatId] || []).map((m) =>
+                m.id === tempId ? { ...m, status: "failed" } : m
+              ),
+            }));
+          }
+        })();
+      });
+    },
+    [selectedChatId, selectedChat, pendingChat, currentUserId, user]
+  );
+
+  //   // ✅ SEND MESSAGE (SOCKET ONLY)
+  //   const handleSendMessage = useCallback(
+  //   async (payload: { text?: string; files?: File[] }) => {
+  //     if (!selectedChatId || !socket) return;
+
+  //     const text = payload.text?.trim() || "";
+  //     const files = payload.files || [];
+
+  //     if (!text && files.length === 0) return;
+
+  //   //     // Get members from selected chat or pending chat
+  //   //     // let members: string[] = [];
+  //   //     // if (selectedChat?.members) {
+  //   //     //   members = selectedChat.members;
+  //   //     // } else if (pendingChat?.members) {
+  //   //     //   members = pendingChat.members;
+  //   //     // }
+  //   //     //or
+  //     const members = selectedChat?.members || pendingChat?.members || [];
+  //     const otherMembers = members.filter((id: string) => id !== currentUserId);
+  //         if (otherMembers.length === 0) {
+  //         console.error("No recipients for message");
+  //         return;
+  //       }
+
+  //     const tempMsgId = `temp-msg-${Date.now()}`;
+  //     const clientId = `client-${Date.now()}`;
+
+  //     // ✅ Create LOCAL preview for media
+  //     const localMedia =
+  //       files.length > 0
+  //         ? files.map((file) => ({
+  //             localUrl: URL.createObjectURL(file),
+  //             type: file.type.startsWith("image")
+  //               ? "image"
+  //               : file.type.startsWith("video")
+  //               ? "video"
+  //               : file.type.startsWith("audio")
+  //               ? "audio"
+  //               : "file",
+  //           }))
+  //         : [];
+
+  //     // ✅ Detect type
+  //     let type = "text";
+  //     let isMixedMedia = false;
+
+  //     if (localMedia.length > 0) {
+  //       const types = localMedia.map((m) => m.type);
+  //       const allSame = types.every((t) => t === types[0]);
+  //       type = allSame ? types[0] : "mixed";
+  //       isMixedMedia = !allSame;
+  //     }
+
+  //     // ✅ OPTIMISTIC MESSAGE (instant UI)
+  //     const optimistic: Message = {
+  //       id: tempMsgId,
+  //       text,
+  //       media: localMedia, // 👈 show instantly
+  //       type,
+  //       createdAt: new Date(),
+  //       isOwn: true,
+  //       senderName: user?.fullName ?? "You",
+  //       status: "sent",
+  //       clientId,
+  //     };
+
+  //     setMessages((prev) => ({
+  //       ...prev,
+  //       [selectedChatId]: [...(prev[selectedChatId] ?? []), optimistic],
+  //     }));
+
+  //     // ✅ SEND MESSAGE IMMEDIATELY (no waiting)
+  //     socket.emit(EVENTS.NEW_MESSAGE, {
+  //       chatId: selectedChatId.startsWith("temp") ? null : selectedChatId,
+  //       members: otherMembers,
+  //       message: {
+  //         text,
+  //         media: localMedia, // temporary
+  //         type,
+  //         isMixedMedia,
+  //         clientId,
+  //       },
+  //       groupName: selectedChat?.isGroup ? selectedChat.chatName : undefined,
+  //     });
+
+  //     // ✅ BACKGROUND UPLOAD (if media exists)
+  //     if (files.length > 0) {
+  //       try {
+  //         const uploadedMedia = await uploadChatMedia(files);
+
+  //         // 🔄 Update message with real URLs
+  //         setMessages((prev) => ({
+  //           ...prev,
+  //           [selectedChatId]: (prev[selectedChatId] || []).map((msg) =>
+  //             msg.id === tempMsgId
+  //               ? {
+  //                   ...msg,
+  //                   media: uploadedMedia,
+  //                   status: "sent",
+  //                 }
+  //               : msg
+  //           ),
+  //         }));
+
+  //         // 🔄 Optional: notify server media uploaded
+  //         socket.emit(EVENTS.MESSAGE_MEDIA_UPLOADED, {
+  //           clientId,
+  //           media: uploadedMedia,
+  //         });
+
+  //       } catch (error) {
+  //         console.error(error);
+
+  //         // ❌ mark failed
+  //         setMessages((prev) => ({
+  //           ...prev,
+  //           [selectedChatId]: (prev[selectedChatId] || []).map((msg) =>
+  //             msg.id === tempMsgId
+  //               ? { ...msg, status: "failed" }
+  //               : msg
+  //           ),
+  //         }));
+  //       }
+  //     }
+  //   },
+  //   [selectedChatId, selectedChat, pendingChat, currentUserId, user]
+  // );
+
+  console.log("ALL USERS:", allUsers);
+  console.log("FILTERED USERS:", filteredUsers);
 
   return <div className="h-[calc(100vh-4rem)] flex bg-background">
     <ChatSidebar
@@ -851,9 +1177,17 @@ const Chat = () => {
       selectedChat={selectedChat}
       messages={currentMessages}
       selectedChatId={selectedChatId}
-      onSendMessage={handleSendMessage}
+      handleSendMessage={handleSendMessage}
       handleNewChat={() => setNewChatOpen(true)}
-      socketRef={socketRef}
+      onAddMembers={handleAddMembers}
+      onRemoveMember={handleRemoveMember}
+      onLeaveGroup={handleLeaveGroup}
+      onRenameGroup={handleRenameGroup}
+      onToggleAdmin={handleToggleAdmin}
+      currentUserId={currentUserId}
+      onlineUserIds={onlineUsers}
+      handleUpdateGroupIcon={handleUpdateGroupIcon}
+      handleRemoveGroupIcon={handleRemoveGroupIcon}
     />
     {/* New Chat Dialog */}
     <Dialog open={newChatOpen} onOpenChange={setNewChatOpen}>

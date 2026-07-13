@@ -416,8 +416,6 @@ export default function CreateProduct3() {
     };
 
 
-
-
     // IntersectionObserver for scroll spy
     useEffect(() => {
         if (wizardMode) return; // skip in wizard mode
@@ -588,7 +586,6 @@ export default function CreateProduct3() {
                             )}
                         </div>
                     </div>
-
 
 
                     {!wizardMode && (
