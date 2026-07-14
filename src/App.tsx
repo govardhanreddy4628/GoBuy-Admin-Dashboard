@@ -1,9 +1,8 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import "./App.css"
 import { Routes, Route, Navigate } from "react-router-dom";
 // import { theme } from './themes/theme';
 // import Sticky from './components/sticky/sticky';
-
 
 import { ThemeProvider } from './context/themeContext';
 //import NotFound from "./pages/NotFound";
@@ -51,6 +50,12 @@ import LogoManager from './components/admin/logo/logoManagement.tsx';
 
 const App = () => {
   const queryClient = new QueryClient();
+
+  useEffect(() => {
+    fetch(`${import.meta.env.VITE_BACKEND_URL_PRODUCTION}/health`)
+      .then(() => console.log("Server warmed up"))
+      .catch(() => console.log("Server wake failed"));
+  }, []);
 
   return (
     <>

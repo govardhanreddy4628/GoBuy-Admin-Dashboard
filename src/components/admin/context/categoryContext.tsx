@@ -2,6 +2,7 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { Category, CategoryFormData } from "../types/category";
 import { getCategoryId } from "../categories/CategoryUtility";
+import { GET, POST, PUT, DELETE, BASE_URL } from "../../../api/api_utility";
 
 interface CategoryContextType {
   categories: Category[];
@@ -35,9 +36,8 @@ export function CategoryProvider({ children }: { children: React.ReactNode }) {
   const fetchCategories = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${import.meta.env.VITE_BACKEND_URL_LOCAL}/api/v1/category/tree`);
-
-      const data = await res.json();
+      const res = await GET("/api/v1/category/tree");
+      const data = res.data;
       console.log("Fetched category tree:", data);
 
       if (data.success) {
@@ -70,8 +70,6 @@ export function CategoryProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
 
-
-
   const findCategoryById = (id: string, cats: Category[] = categories): Category | null => {
     if (!Array.isArray(cats)) return null;
     for (const cat of cats) {
@@ -93,7 +91,6 @@ export function CategoryProvider({ children }: { children: React.ReactNode }) {
   };
 
 
-
   // ------------------ Add Category ------------------
   const addCategory = async (data: CategoryFormData): Promise<Category> => {
     console.log(data.imageFile)
@@ -104,18 +101,8 @@ export function CategoryProvider({ children }: { children: React.ReactNode }) {
     if (data.imageFile) formData.append("image", data.imageFile);
 
 
-    const res = await fetch(`${import.meta.env.VITE_BACKEND_URL_LOCAL}/api/v1/category/create`, {
-      method: "POST",
-      body: formData,
-    });
-
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Category creation failed: ${text}`);
-    }
-
-    const body = await res.json();
-    const savedCategory: Category = body.category ?? body;
+    const res = await POST("/api/v1/category/create", formData);
+    const savedCategory = res.data.category ?? res.data;
 
     // Normalize dates and IDs if necessary
     const normalized: Category = {
@@ -165,21 +152,8 @@ export function CategoryProvider({ children }: { children: React.ReactNode }) {
       }
     });
 
-    const res = await fetch(
-      `${import.meta.env.VITE_BACKEND_URL_LOCAL}/api/v1/category/update/${id}`,
-      {
-        method: "PUT",
-        body: formData, // ❌ NO Content-Type header
-      }
-    );
-
-    const body = await res.json();
-
-    if (!res.ok || !body.success) {
-      throw new Error(body.message || "Failed to update category");
-    }
-
-    const updated = body.category ?? body.data;
+    const res = await PUT(`/api/v1/category/update/${id}`, formData);
+    const updated = res.data.category ?? res.data.data;
 
     const normalized: Category = {
       ...updated,
@@ -229,16 +203,7 @@ export function CategoryProvider({ children }: { children: React.ReactNode }) {
 
   // ------------------ Delete Category ------------------
   const deleteCategory = async (id: string): Promise<void> => {
-    const res = await fetch(
-      `${import.meta.env.VITE_BACKEND_URL_LOCAL}/api/v1/category/delete/${id}`,
-      { method: "DELETE" }
-    );
-
-    const body = await res.json();
-
-    if (!res.ok || !body.success) {
-      throw new Error(body.message || "Failed to delete category");
-    }
+    await DELETE(`/api/v1/category/delete/${id}`);
 
     const deleteFromTree = (cats: Category[]): Category[] =>
       cats
@@ -252,7 +217,7 @@ export function CategoryProvider({ children }: { children: React.ReactNode }) {
   // Move subcategories before delete
   const moveSubcategories = async (fromId: string, newParentId: string | null) => {
     const res = await fetch(
-      `${import.meta.env.VITE_BACKEND_URL_LOCAL}/api/v1/category/move-subcategories`,
+      `${BASE_URL}/api/v1/category/move-subcategories`,
       {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -272,44 +237,18 @@ export function CategoryProvider({ children }: { children: React.ReactNode }) {
 
 
   const checkCategoryHasProducts = async (categoryId: string) => {
-    const res = await fetch(
-      `${import.meta.env.VITE_BACKEND_URL_LOCAL}/api/v1/category/${categoryId}/has-products`,
-    );
-
-    const body = await res.json();
-
-    if (!res.ok || !body.success) {
-      throw new Error(body.message || "Failed to move subcategories");
-    }
-
-    console.log(body)
-    console.log(body.data)
-    console.log(body.data.hasProducts)
-    return body.data.hasProducts; // boolean
-
+    const res = await GET(`/api/v1/category/${categoryId}/has-products`);
+    return res.data?.hasProducts ?? false; // boolean
   };
 
 
   const moveProductsToCategory = async (fromId: string, newCategoryId: string) => {
-    const res = await fetch(
-      `${import.meta.env.VITE_BACKEND_URL_LOCAL}/api/v1/category/move-products`,
-      {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fromCategoryId: fromId, newCategoryId }),
-      }
-    );
-
-    const body = await res.json();
-
-    if (!res.ok || !body.success) {
-      throw new Error(body.message || "Failed to move products");
-    }
-
-    return body.data;
+    const res = await POST("/api/v1/category/move-products", {
+      fromCategoryId: fromId,
+      newCategoryId,
+    });
+    return res.data;
   };
-
-
 
   return (
     <CategoryContext.Provider value={{ categories, addCategory, updateCategory, deleteCategory, loading, findCategoryById, getAllCategories, moveSubcategories, checkCategoryHasProducts, moveProductsToCategory }}>
@@ -325,8 +264,6 @@ export function useCategories() {
   }
   return context;
 }
-
-
 
 
 

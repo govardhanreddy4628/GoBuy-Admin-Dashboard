@@ -1,7 +1,7 @@
 import axios, { AxiosError, AxiosInstance, AxiosRequestConfig } from "axios";
 
 //Config
-const BASE_URL = import.meta.env.MODE === "development" ? import.meta.env.VITE_BACKEND_URL_LOCAL || "http://localhost:5000" : import.meta.env.VITE_BACKEND_URL_PRODUCTION;
+export const BASE_URL = import.meta.env.MODE === "development" ? import.meta.env.VITE_BACKEND_URL_LOCAL || "http://localhost:5000" : import.meta.env.VITE_BACKEND_URL_PRODUCTION;
 
 //In-memory access token
 let accessToken: string | null = null;
@@ -17,7 +17,7 @@ export const getAccessToken = () => accessToken;
 const api: AxiosInstance = axios.create({
   baseURL: BASE_URL,
   withCredentials: true, // refresh cookie
-  timeout: 10000,
+  timeout: 30000,
 });
 
 // 🔥 Separate client for refresh
