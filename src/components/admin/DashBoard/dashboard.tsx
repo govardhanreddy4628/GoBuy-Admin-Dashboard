@@ -25,7 +25,7 @@ import { PredictionChart } from './PredictionChart';
 import DashboardStatsCards from './dashboardStatsCards';
 import ProductFunnelChart from './productFunnelChart';
 import ProductConversionAnalytics from './productConversionAnalytics';
-import { GET } from '../../../api/api_utility';
+import { BASE_URL, GET } from '../../../api/api_utility';
 import { OrdersChart } from './OrdersChart';
 import CategoryBreakdownCard from './categoryBreakDownCard';
 //import RevenueChart from './RevenueChart';
@@ -34,6 +34,8 @@ import { RevenueChart } from './RevenueChart2';
 import Orders from '../orders/Orders';
 import { Socket } from "socket.io-client";
 import { Plus } from 'lucide-react';
+import { useAuth } from '../../../context/authContext';
+
 
 ChartJS.register(
   CategoryScale,
@@ -133,6 +135,7 @@ export function Dashboard() {
   const [ordersChart, setOrdersChart] = useState<OrdersData[]>([]);
   const [customersData, setCustomersData] = useState<CustomersData[]>([]);
   const [revenueData, setRevenueData] = useState<RevenueData[]>([]);
+  const { user } = useAuth();
 
   //   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
@@ -283,7 +286,7 @@ export function Dashboard() {
   const socketRef = useRef<Socket | null>(null);
   useEffect(() => {
     // ✅ initialize socket
-    socketRef.current = io(import.meta.env.VITE_API_URL || "http://localhost:5000");
+    socketRef.current = io(BASE_URL || "http://localhost:5000");
 
     const loadAnalytics = async () => {
       try {
@@ -353,7 +356,7 @@ export function Dashboard() {
           <div className='col-span-1 p-4 lg:p-6 bg-slate-100 dark:bg-slate-400 border border-[rgba(0,0,0,0.1)] rounded-lg shadow-lg min-w-48 my-6 pt-8 flex items-center justify-between'>
             <div>
               <h1 className="text-3xl font-bold mb-1 text-black">Welcome,</h1>
-              <h1 className='text-3xl font-bold text-primary'>John Doe 👋</h1>
+              <h1 className='text-3xl font-bold text-primary'>{user?.fullName || "test user"} 👋</h1>
               <p className="text-gray-600 mt-4">Here’s What happening on your store today. See the statistics at once.</p>
               <Link to="/products/create">
                 <Button className="gap-2 mt-2">

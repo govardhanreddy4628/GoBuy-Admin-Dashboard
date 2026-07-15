@@ -19,6 +19,8 @@ import { useIsMobile } from '../../hooks/useMobile';
 import LogoutDialog from './logoutDialog';
 import { SiBloglovin } from "react-icons/si";
 import { PiApplePodcastsLogo } from "react-icons/pi";
+import { Avatar, AvatarFallback, AvatarImage } from '../../ui/avatar';
+import { useAuth } from '../../context/authContext';
 
 
 type NavItem = {
@@ -34,10 +36,10 @@ export const navItems: NavItem[] = [
   { title: 'Orders', icon: IoCubeOutline, href: '/orders' },
   { title: 'Customers', icon: FaRegUserCircle, href: '/customers' },
   {
-      title: "Categories",
-      icon: BiCategory,
-      href: "/categories/manage",
-    },
+    title: "Categories",
+    icon: BiCategory,
+    href: "/categories/manage",
+  },
   {
     title: 'Products',
     icon: RiProductHuntLine,
@@ -69,6 +71,7 @@ type SidebarProps = {
 const Sidebar = ({ isExpand, toggleExpand, setIsExpand }: SidebarProps) => {
   const location = useLocation().pathname;
   const isMobile = useIsMobile()
+  const { user } = useAuth();
 
   const [openIndex, setOpenIndex] = useState<number | null>(null);
   const [logoutModalOpen, setLogoutModalOpen] = useState(false);
@@ -187,10 +190,20 @@ const Sidebar = ({ isExpand, toggleExpand, setIsExpand }: SidebarProps) => {
 
         <div className='flex justify-between  items-center my-4'>
           <div className='flex items-center gap-4 ml-2'>
-            <Button sx={{ width: "35px", height: "35px", borderRadius: "50%", border: "solid red", padding: 0, minWidth: 0 }}>Go</Button>
+            {!user ? null :
+              <Avatar className="h-9 w-9 cursor-pointer ring-2 ring-transparent transition-all hover:ring-primary/20">
+                <AvatarImage
+                  src={user?.avatar || "https://api.dicebear.com/7.x/avataaars/svg?seed=default"}
+                  alt={user?.fullName || "User"}
+                />
+                <AvatarFallback className="bg-primary text-primary-foreground">
+                  {user?.fullName ? user.fullName.split(" ").map((n) => n[0]).join("").toUpperCase() : "U"}
+                </AvatarFallback>
+              </Avatar>
+            }
             {isExpand ? <div>
-              <p className="text-sm font-semibold text-gray-800">{"john Doe"}</p>
-              <p className="text-xs text-gray-500">{"johndoe@gmail.com"}</p>
+              <p className="text-sm font-semibold text-gray-800">{user?.fullName || "john Doe"}</p>
+              <p className="text-xs text-gray-500">{user?.email || "test-admin@gmail.com"}</p>
             </div> : ""}
           </div>
           {isExpand ? <HiOutlineDotsVertical className='mr-2 h-auto w-auto text-[24px] hover:bg-gray-300 rounded-full p-2 hover:shadow' /> : ""}

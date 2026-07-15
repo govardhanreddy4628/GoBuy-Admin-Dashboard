@@ -118,7 +118,7 @@ export interface DashboardStats {
 const DashboardStatsCards = () => {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
-  const [range, setRange] = useState("month");
+  const [range, setRange] = useState("year");
 
   const fetchDashboardStats = async (range: string) => {
     return GET(`/api/v1/analytics/dashboard-stats?range=${range}`);

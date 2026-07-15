@@ -277,6 +277,7 @@ import { FiSettings } from "react-icons/fi";
 import { cn } from "../../lib/utils";
 import { useIsMobile } from "../../hooks/useMobile";
 import LogoutDialog from "./logoutDialog";
+import { useAuth } from "../../context/authContext";
 
 /* ---------------- NAV ---------------- */
 
@@ -319,6 +320,7 @@ export default function Sidebar({
 
   const [openIndex, setOpenIndex] = useState<number | null>(null);
   const [logoutOpen, setLogoutOpen] = useState(false);
+  const { user } = useAuth();
 
   /* AUTO OPEN SUBMENU */
   useEffect(() => {
@@ -485,10 +487,8 @@ export default function Sidebar({
 
             {isExpand && (
               <div className="text-sm">
-                <p className="font-medium">John</p>
-                <p className="text-gray-500 text-xs">
-                  admin@mail.com
-                </p>
+                 <p className="text-sm font-semibold text-gray-800">{user?.fullName || "test user"}</p>
+              <p className="text-xs text-gray-500">{user?.email || "test-admin@gmail.com"}</p>
               </div>
             )}
           </div>

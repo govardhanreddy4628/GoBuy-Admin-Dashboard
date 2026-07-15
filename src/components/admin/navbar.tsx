@@ -13,6 +13,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "../../ui/avatar";
 import { useNavigate } from "react-router-dom";
 import * as React from "react";
 import LogoutDialog from "./logoutDialog";
+import { useAuth } from '../../context/authContext';
 
 interface NavbarProps {
   className?: string;
@@ -20,6 +21,7 @@ interface NavbarProps {
 
 export function Navbar({ className }: NavbarProps) {
   const [showLogoutDialog, setShowLogoutDialog] = React.useState(false);
+  const { user } = useAuth();
   const navigate = useNavigate();
 
   return (
@@ -73,7 +75,7 @@ export function Navbar({ className }: NavbarProps) {
               <DropdownMenuTrigger className="focus:outline-none">
                 <Avatar className="h-10 w-10 cursor-pointer ring-2 ring-transparent hover:ring-primary/20 transition">
                   <AvatarImage
-                    src="https://api.dicebear.com/7.x/avataaars/svg?seed=admin"
+                    src={user?.avatar || "https://api.dicebear.com/7.x/avataaars/svg?seed=admin"}
                     alt="Admin"
                   />
                   <AvatarFallback>AD</AvatarFallback>
@@ -83,9 +85,9 @@ export function Navbar({ className }: NavbarProps) {
               <DropdownMenuContent align="end" className="w-56">
                 <DropdownMenuLabel>
                   <div className="flex flex-col space-y-1">
-                    <p className="text-sm font-medium">Admin User</p>
+                    <p className="text-sm font-medium">{user?.fullName || "test user"}</p>
                     <p className="text-xs text-muted-foreground">
-                      admin@example.com
+                      {user?.email || "test-admin@example.com"}
                     </p>
                   </div>
                 </DropdownMenuLabel>
