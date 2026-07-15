@@ -1,7 +1,7 @@
 import axios, { AxiosError, AxiosInstance, AxiosRequestConfig } from "axios";
 
 //Config
-export const BASE_URL = import.meta.env.MODE === "development" ? import.meta.env.VITE_BACKEND_URL_LOCAL || "http://localhost:5000" : import.meta.env.VITE_BACKEND_URL_PRODUCTION;
+export const BASE_URL = import.meta.env.VITE_APP_ENV === "development" ? import.meta.env.VITE_BACKEND_URL_LOCAL || "http://localhost:5000" : import.meta.env.VITE_BACKEND_URL_PRODUCTION;
 
 //In-memory access token
 let accessToken: string | null = null;

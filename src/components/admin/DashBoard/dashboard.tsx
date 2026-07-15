@@ -149,7 +149,7 @@ export function Dashboard() {
   // const mainBg = isDark ? 'bg-gray-900' : 'bg-gray-100';
   // const textColor = isDark ? 'text-gray-100' : 'text-gray-800';
 
-  const [timeRange, setTimeRange] = useState('Month');
+  const [timeRange, setTimeRange] = useState('Year');
 
   // Mock data for different ranges
   // const chartDataByRange = {
@@ -287,7 +287,7 @@ export function Dashboard() {
 
     const loadAnalytics = async () => {
       try {
-        const orders = await GET<{ data: OrdersData[] }>(`api/v1/analytics/orders-overview?range=${timeRange}`);
+        const orders = await GET<{ data: OrdersData[] }>(`/api/v1/analytics/orders-overview?range=${timeRange}`);
         setOrdersChart(orders.data.data || []);
 
         const revenue = await GET<{ data: RevenueData[] }>("/api/v1/analytics/revenue-overview?range=" + timeRange);
@@ -300,13 +300,13 @@ export function Dashboard() {
         // const revenue2 = await GET<{ data: MonthlyRevenue[] }>("api/v1/analytics/monthly-revenue");
         // setMonthlyRevenue(revenue.data || []);
 
-        const payments = await GET("api/v1/analytics/payment-methods");
+        const payments = await GET("/api/v1/analytics/payment-methods");
         setPaymentData(payments.data || []);
 
-        const heatmap = await GET<{ data: HeatmapItem[] }>("api/v1/analytics/heatmap");
+        const heatmap = await GET<{ data: HeatmapItem[] }>("/api/v1/analytics/heatmap");
         setHeatmapData(heatmap.data.data || []);
 
-        const prediction = await GET("api/v1/analytics/prediction");
+        const prediction = await GET("/api/v1/analytics/prediction");
         setPredictionData(prediction.data || []);
       } catch (error) {
         console.error("Analytics load failed", error)
